@@ -19,6 +19,7 @@ These are small, boring bugs, but they eat real time, especially onboarding new 
 It reports:
 - Variables **used in code but missing from `.env.example`** → undocumented config, will break for new devs.
 - Variables **documented but missing from your local `.env`** → you're probably about to hit a bug.
+- Variables **documented in `.env.example` but never referenced anywhere in source** → dead config left behind after a feature was removed, cluttering onboarding docs.
 - **`.env` accidentally tracked by git** → critical risk, flagged loudly.
 - Secret-looking keys (`*_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`, ...) that have a value set locally, as a reminder to never commit them.
 
@@ -53,6 +54,9 @@ envguard — environment variable drift report
 [MISSING FROM .env] (1) — documented but not set locally
   - JWT_SECRET
 
+[UNUSED] (1) — documented in .env.example but never referenced in source code
+  - OLD_FEATURE_TOGGLE
+
 2 issue(s) found.
 ```
 
@@ -79,6 +83,15 @@ go build -o envguard .
 | JavaScript/TypeScript | `process.env.X`, `process.env["X"]` |
 | Go | `os.Getenv("X")`, `os.LookupEnv("X")` |
 | Python | `os.environ["X"]`, `os.environ.get("X")`, `os.getenv("X")` |
+
+## Tests
+
+```bash
+go test ./...
+```
+
+Covers: undocumented vars, missing local vars, clean projects (no drift), and
+dead config (a var in `.env.example` that no source file references anymore).
 
 ## License
 

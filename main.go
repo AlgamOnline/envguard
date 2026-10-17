@@ -233,13 +233,32 @@ func report(f *findings) int {
 		fmt.Println("\n[SKIP] no local .env file found, skipping local-completeness check")
 	}
 
-	// 3. .env tracked by git (should never happen)
+	// 3. documented in .env.example but never referenced in any source file (dead config)
+	if len(f.exampleEnv) > 0 {
+		var unused []string
+		for name := range f.exampleEnv {
+			if _, ok := f.usedVars[name]; !ok {
+				unused = append(unused, name)
+			}
+		}
+		sort.Strings(unused)
+		if len(unused) > 0 {
+			fmt.Printf("\n[UNUSED] (%d) — documented in .env.example but never referenced in source code\n", len(unused))
+			for _, name := range unused {
+				fmt.Printf("  - %s\n", name)
+			}
+		} else {
+			fmt.Println("\n[OK] every variable in .env.example is actually used in code")
+		}
+	}
+
+	// 4. .env tracked by git (should never happen)
 	if f.trackedEnv {
 		issues++
 		fmt.Println("\n[RISK] .env is tracked by git! Add it to .gitignore and rotate any committed secrets.")
 	}
 
-	// 4. secret-looking keys that have a non-empty local value (informational)
+	// 5. secret-looking keys that have a non-empty local value (informational)
 	if len(f.secretsInEnv) > 0 {
 		sort.Strings(f.secretsInEnv)
 		fmt.Printf("\n[INFO] secret-looking keys with a local value set (%d) — make sure these never get committed\n", len(f.secretsInEnv))
