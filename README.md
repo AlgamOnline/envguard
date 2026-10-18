@@ -40,6 +40,9 @@ envguard /path/to/project
 
 # CI mode: exit code 1 if any drift/risk is found, 0 if clean
 envguard -ci .
+
+# JSON output: machine-readable, for CI annotations or other tooling
+envguard -json .
 ```
 
 Example output:
@@ -71,6 +74,30 @@ go build -o envguard .
 ./envguard .
 ```
 
+## JSON output
+
+`-json` prints a machine-readable report instead of text, so CI pipelines or
+other scripts can consume it without parsing human-readable output:
+
+```bash
+envguard -json . | jq '.issue_count'
+```
+
+```json
+{
+  "missing_from_example": ["FEATURE_FLAG_X"],
+  "missing_from_env": ["JWT_SECRET"],
+  "unused": ["OLD_FEATURE_TOGGLE"],
+  "env_tracked_by_git": false,
+  "secrets_set_locally": [],
+  "used_var_locations": { "FEATURE_FLAG_X": ["app.js"] },
+  "issue_count": 2
+}
+```
+
+`-ci` and `-json` can be combined (`envguard -ci -json .`): exit code still
+reflects drift, stdout is JSON.
+
 ## Tech stack
 
 - **Go** (stdlib only — `regexp`, `flag`, `bufio`, `path/filepath`, `os/exec`) — no third-party dependencies, so it compiles to one portable static binary for any OS/arch Go supports.
@@ -90,8 +117,9 @@ go build -o envguard .
 go test ./...
 ```
 
-Covers: undocumented vars, missing local vars, clean projects (no drift), and
-dead config (a var in `.env.example` that no source file references anymore).
+Covers: undocumented vars, missing local vars, clean projects (no drift),
+dead config (a var in `.env.example` that no source file references anymore),
+and JSON output correctness.
 
 ## License
 

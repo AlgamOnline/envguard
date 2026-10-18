@@ -17,6 +17,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -41,15 +42,16 @@ var (
 )
 
 type findings struct {
-	usedVars   map[string][]string // var -> files that reference it
-	exampleEnv map[string]string   // var -> raw value in .env.example
-	localEnv   map[string]string   // var -> raw value in .env
-	trackedEnv bool                // .env is tracked by git
+	usedVars     map[string][]string // var -> files that reference it
+	exampleEnv   map[string]string   // var -> raw value in .env.example
+	localEnv     map[string]string   // var -> raw value in .env
+	trackedEnv   bool                // .env is tracked by git
 	secretsInEnv []string
 }
 
 func main() {
 	ci := flag.Bool("ci", false, "exit non-zero if any drift or risk is found")
+	asJSON := flag.Bool("json", false, "output machine-readable JSON instead of text (for CI/tooling integration)")
 	flag.Parse()
 
 	root := "."
@@ -68,11 +70,82 @@ func main() {
 		os.Exit(2)
 	}
 
-	issues := report(f)
+	var issues int
+	if *asJSON {
+		issues = reportJSON(f)
+	} else {
+		issues = report(f)
+	}
 
 	if *ci && issues > 0 {
 		os.Exit(1)
 	}
+}
+
+// jsonReport is the machine-readable shape emitted by -json, designed to be
+// easy to consume from CI scripts, GitHub Actions annotations, or other
+// tooling without scraping the human-readable text output.
+type jsonReport struct {
+	MissingFromExample []string            `json:"missing_from_example"`
+	MissingFromEnv     []string            `json:"missing_from_env"`
+	Unused             []string            `json:"unused"`
+	EnvTrackedByGit    bool                `json:"env_tracked_by_git"`
+	SecretsSetLocally  []string            `json:"secrets_set_locally"`
+	UsedVarLocations   map[string][]string `json:"used_var_locations,omitempty"`
+	IssueCount         int                 `json:"issue_count"`
+}
+
+// buildReport computes the same findings as report() but returns them as a
+// struct instead of printing, so both the text and JSON renderers share one
+// source of truth.
+func buildReport(f *findings) jsonReport {
+	r := jsonReport{UsedVarLocations: f.usedVars}
+
+	for _, name := range sortedKeys(f.usedVars) {
+		if _, ok := f.exampleEnv[name]; !ok {
+			r.MissingFromExample = append(r.MissingFromExample, name)
+		}
+	}
+
+	if len(f.localEnv) > 0 {
+		for name := range f.exampleEnv {
+			if _, ok := f.localEnv[name]; !ok {
+				r.MissingFromEnv = append(r.MissingFromEnv, name)
+			}
+		}
+		sort.Strings(r.MissingFromEnv)
+	}
+
+	for name := range f.exampleEnv {
+		if _, ok := f.usedVars[name]; !ok {
+			r.Unused = append(r.Unused, name)
+		}
+	}
+	sort.Strings(r.Unused)
+
+	r.EnvTrackedByGit = f.trackedEnv
+	r.SecretsSetLocally = append([]string{}, f.secretsInEnv...)
+	sort.Strings(r.SecretsSetLocally)
+
+	r.IssueCount = len(r.MissingFromExample) + len(r.MissingFromEnv) + len(r.Unused)
+	if r.EnvTrackedByGit {
+		r.IssueCount++
+	}
+	return r
+}
+
+// reportJSON prints the findings as JSON to stdout and returns the issue
+// count (unused vars and secret hints are informational, not counted as
+// issues, matching the text report's exit-code semantics).
+func reportJSON(f *findings) int {
+	r := buildReport(f)
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(r); err != nil {
+		fmt.Fprintln(os.Stderr, "envguard: failed to encode JSON:", err)
+		return r.IssueCount
+	}
+	return r.IssueCount
 }
 
 func scan(root string, f *findings) error {
