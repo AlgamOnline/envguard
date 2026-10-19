@@ -29,16 +29,21 @@ import (
 )
 
 var (
-	reJSEnv     = regexp.MustCompile(`process\.env\.([A-Za-z_][A-Za-z0-9_]*)`)
-	reJSEnvIdx  = regexp.MustCompile(`process\.env\[['"]([A-Za-z_][A-Za-z0-9_]*)['"]\]`)
-	reGoEnv     = regexp.MustCompile(`os\.(?:Getenv|LookupEnv|MustGetenv)\(\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*\)`)
-	rePyEnv1    = regexp.MustCompile(`os\.environ\[\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s*\]`)
-	rePyEnv2    = regexp.MustCompile(`os\.environ\.get\(\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]`)
-	rePyEnv3    = regexp.MustCompile(`os\.getenv\(\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]`)
-	reEnvFile   = regexp.MustCompile(`^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$`)
-	skipDirs    = map[string]bool{".git": true, "node_modules": true, "vendor": true, "dist": true, "build": true, ".next": true, "__pycache__": true, ".venv": true, "venv": true}
-	secretHints = regexp.MustCompile(`(?i)(key|secret|token|password|pass|pwd|api)`)
-	sourceExts  = map[string]bool{".js": true, ".jsx": true, ".ts": true, ".tsx": true, ".mjs": true, ".cjs": true, ".go": true, ".py": true}
+	reJSEnv    = regexp.MustCompile(`process\.env\.([A-Za-z_][A-Za-z0-9_]*)`)
+	reJSEnvIdx = regexp.MustCompile(`process\.env\[['"]([A-Za-z_][A-Za-z0-9_]*)['"]\]`)
+	// reJSEnvDestructure matches `const { A, B: alias, C = "default" } = process.env`
+	// (and `let`/`var`), a very common pattern that plain process.env.X scanning
+	// misses entirely, producing false "undocumented var" negatives.
+	reJSEnvDestructure  = regexp.MustCompile(`(?:const|let|var)\s*\{\s*([^}]+?)\s*\}\s*=\s*process\.env\b`)
+	reJSDestructureName = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)`)
+	reGoEnv             = regexp.MustCompile(`os\.(?:Getenv|LookupEnv|MustGetenv)\(\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*\)`)
+	rePyEnv1            = regexp.MustCompile(`os\.environ\[\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s*\]`)
+	rePyEnv2            = regexp.MustCompile(`os\.environ\.get\(\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]`)
+	rePyEnv3            = regexp.MustCompile(`os\.getenv\(\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]`)
+	reEnvFile           = regexp.MustCompile(`^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$`)
+	skipDirs            = map[string]bool{".git": true, "node_modules": true, "vendor": true, "dist": true, "build": true, ".next": true, "__pycache__": true, ".venv": true, "venv": true}
+	secretHints         = regexp.MustCompile(`(?i)(key|secret|token|password|pass|pwd|api)`)
+	sourceExts          = map[string]bool{".js": true, ".jsx": true, ".ts": true, ".tsx": true, ".mjs": true, ".cjs": true, ".go": true, ".py": true}
 )
 
 type findings struct {
@@ -235,12 +240,34 @@ func scanSource(path, ext string, f *findings) {
 	default: // js/ts family
 		matches = append(matches, reJSEnv.FindAllStringSubmatch(content, -1)...)
 		matches = append(matches, reJSEnvIdx.FindAllStringSubmatch(content, -1)...)
+		for _, name := range extractDestructuredNames(content) {
+			f.usedVars[name] = appendUnique(f.usedVars[name], path)
+		}
 	}
 
 	for _, m := range matches {
 		name := m[1]
 		f.usedVars[name] = appendUnique(f.usedVars[name], path)
 	}
+}
+
+// extractDestructuredNames finds env var names pulled out via object
+// destructuring, e.g. `const { PORT, DB_URL: url, TIMEOUT = 30 } = process.env`.
+// Only the real env var name (left of any `: alias` or `= default`) is kept.
+func extractDestructuredNames(content string) []string {
+	var names []string
+	for _, block := range reJSEnvDestructure.FindAllStringSubmatch(content, -1) {
+		for _, field := range strings.Split(block[1], ",") {
+			field = strings.TrimSpace(field)
+			if field == "" {
+				continue
+			}
+			if m := reJSDestructureName.FindStringSubmatch(field); m != nil {
+				names = append(names, m[1])
+			}
+		}
+	}
+	return names
 }
 
 func appendUnique(list []string, v string) []string {

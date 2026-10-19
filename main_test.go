@@ -66,6 +66,19 @@ func TestJSONOutputIsValidAndMatchesTextFindings(t *testing.T) {
 	}
 }
 
+// TestDestructuredEnvVarsAreDetected covers object-destructuring of
+// process.env (const { A, B: alias, C = "default" } = process.env), a
+// common JS/TS pattern the plain process.env.X regex misses.
+func TestDestructuredEnvVarsAreDetected(t *testing.T) {
+	out := runEnvguard(t, "testdata/destructure")
+	if !strings.Contains(out, "STRIPE_KEY") {
+		t.Errorf("expected destructured STRIPE_KEY to be flagged as undocumented, got:\n%s", out)
+	}
+	if strings.Contains(out, "DB_URL") && strings.Contains(out, "MISSING FROM .env.example") && strings.Contains(out, "- DB_URL") {
+		t.Errorf("DB_URL is documented via alias destructuring, should not be flagged undocumented, got:\n%s", out)
+	}
+}
+
 func contains(list []string, v string) bool {
 	for _, x := range list {
 		if x == v {

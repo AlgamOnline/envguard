@@ -12,7 +12,7 @@ These are small, boring bugs, but they eat real time, especially onboarding new 
 
 `envguard` scans a project directory and cross-references:
 
-1. **Env vars used in source code** — `process.env.X` (JS/TS), `os.Getenv("X")` / `os.LookupEnv("X")` (Go), `os.environ["X"]` / `os.getenv("X")` (Python)
+1. **Env vars used in source code** — `process.env.X` (JS/TS, including `const { X, Y: alias } = process.env` destructuring), `os.Getenv("X")` / `os.LookupEnv("X")` (Go), `os.environ["X"]` / `os.getenv("X")` (Python)
 2. **Env vars documented** in `.env.example` / `.env.sample` / `.env.template`
 3. **Env vars actually set locally** in `.env`
 
@@ -107,7 +107,7 @@ reflects drift, stdout is JSON.
 
 | Language | Patterns detected |
 |---|---|
-| JavaScript/TypeScript | `process.env.X`, `process.env["X"]` |
+| JavaScript/TypeScript | `process.env.X`, `process.env["X"]`, destructuring: `const { X, Y: alias } = process.env` |
 | Go | `os.Getenv("X")`, `os.LookupEnv("X")` |
 | Python | `os.environ["X"]`, `os.environ.get("X")`, `os.getenv("X")` |
 
@@ -119,6 +119,7 @@ go test ./...
 
 Covers: undocumented vars, missing local vars, clean projects (no drift),
 dead config (a var in `.env.example` that no source file references anymore),
+destructured `process.env` usage (`const { X, Y: alias } = process.env`),
 and JSON output correctness.
 
 ## License
