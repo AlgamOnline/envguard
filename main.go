@@ -44,14 +44,43 @@ var (
 	skipDirs            = map[string]bool{".git": true, "node_modules": true, "vendor": true, "dist": true, "build": true, ".next": true, "__pycache__": true, ".venv": true, "venv": true}
 	secretHints         = regexp.MustCompile(`(?i)(key|secret|token|password|pass|pwd|api)`)
 	sourceExts          = map[string]bool{".js": true, ".jsx": true, ".ts": true, ".tsx": true, ".mjs": true, ".cjs": true, ".go": true, ".py": true}
+	// placeholderHints matches values that are clearly dummy/placeholder text,
+	// so a real-looking secret value isn't confused with "your_key_here".
+	placeholderHints = regexp.MustCompile(`(?i)^(your[_-]?|my[_-]?|<|\[|\{\{|x{3,}|changeme|change_me|example|sample|dummy|placeholder|todo|fixme|replace|test|fake|none|null|xxx|foo|bar|some|insert|here|secret_here|value|redacted|\*{3,})`)
 )
 
+// looksLikeRealSecret heuristically flags a .env.example value that looks
+// like an actual leaked credential rather than a placeholder: long enough,
+// no spaces, and not matching common placeholder wording.
+func looksLikeRealSecret(v string) bool {
+	v = strings.TrimSpace(v)
+	if v == "" || len(v) < 16 || strings.Contains(v, " ") {
+		return false
+	}
+	if placeholderHints.MatchString(v) {
+		return false
+	}
+	hasLetter, hasDigit := false, false
+	for _, r := range v {
+		switch {
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+			hasLetter = true
+		}
+	}
+	// real tokens/keys are near-always alphanumeric (plus -_./) with both
+	// letters and digits; pure words or pure numbers are less suspicious.
+	return hasLetter && hasDigit
+}
+
 type findings struct {
-	usedVars     map[string][]string // var -> files that reference it
-	exampleEnv   map[string]string   // var -> raw value in .env.example
-	localEnv     map[string]string   // var -> raw value in .env
-	trackedEnv   bool                // .env is tracked by git
-	secretsInEnv []string
+	usedVars        map[string][]string // var -> files that reference it
+	exampleEnv      map[string]string   // var -> raw value in .env.example
+	localEnv        map[string]string   // var -> raw value in .env
+	trackedEnv      bool                // .env is tracked by git
+	secretsInEnv    []string
+	leakedInExample []string // keys in .env.example whose value looks like a real secret, not a placeholder
 }
 
 func main() {
@@ -96,6 +125,7 @@ type jsonReport struct {
 	Unused             []string            `json:"unused"`
 	EnvTrackedByGit    bool                `json:"env_tracked_by_git"`
 	SecretsSetLocally  []string            `json:"secrets_set_locally"`
+	LeakedInExample    []string            `json:"leaked_in_example,omitempty"`
 	UsedVarLocations   map[string][]string `json:"used_var_locations,omitempty"`
 	IssueCount         int                 `json:"issue_count"`
 }
@@ -131,11 +161,13 @@ func buildReport(f *findings) jsonReport {
 	r.EnvTrackedByGit = f.trackedEnv
 	r.SecretsSetLocally = append([]string{}, f.secretsInEnv...)
 	sort.Strings(r.SecretsSetLocally)
+	r.LeakedInExample = append([]string{}, f.leakedInExample...)
 
 	r.IssueCount = len(r.MissingFromExample) + len(r.MissingFromEnv) + len(r.Unused)
 	if r.EnvTrackedByGit {
 		r.IssueCount++
 	}
+	r.IssueCount += len(r.LeakedInExample)
 	return r
 }
 
@@ -200,6 +232,12 @@ func scan(root string, f *findings) error {
 			f.secretsInEnv = append(f.secretsInEnv, k)
 		}
 	}
+	for k, v := range f.exampleEnv {
+		if looksLikeRealSecret(v) {
+			f.leakedInExample = append(f.leakedInExample, k)
+		}
+	}
+	sort.Strings(f.leakedInExample)
 	return nil
 }
 
@@ -356,6 +394,16 @@ func report(f *findings) int {
 	if f.trackedEnv {
 		issues++
 		fmt.Println("\n[RISK] .env is tracked by git! Add it to .gitignore and rotate any committed secrets.")
+	}
+
+	// 4b. .env.example contains a value that looks like a real secret, not a placeholder
+	if len(f.leakedInExample) > 0 {
+		issues += len(f.leakedInExample)
+		fmt.Printf("\n[RISK] (%d) — .env.example has a value that looks like a REAL secret, not a placeholder\n", len(f.leakedInExample))
+		for _, name := range f.leakedInExample {
+			fmt.Printf("  - %s\n", name)
+		}
+		fmt.Println("  This file is usually committed to git. If this is a real credential, rotate it now.")
 	}
 
 	// 5. secret-looking keys that have a non-empty local value (informational)

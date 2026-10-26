@@ -21,6 +21,7 @@ It reports:
 - Variables **documented but missing from your local `.env`** → you're probably about to hit a bug.
 - Variables **documented in `.env.example` but never referenced anywhere in source** → dead config left behind after a feature was removed, cluttering onboarding docs.
 - **`.env` accidentally tracked by git** → critical risk, flagged loudly.
+- **`.env.example` holding a real-looking secret value instead of a placeholder** → the classic "copy-pasted my real .env into .env.example and forgot to blank it out" mistake. `.env.example` is normally the one file meant to be committed and public, so a real key sitting in it is a live leak, not just drift.
 - Secret-looking keys (`*_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`, ...) that have a value set locally, as a reminder to never commit them.
 
 ## Why it matters
@@ -120,7 +121,8 @@ go test ./...
 Covers: undocumented vars, missing local vars, clean projects (no drift),
 dead config (a var in `.env.example` that no source file references anymore),
 destructured `process.env` usage (`const { X, Y: alias } = process.env`),
-and JSON output correctness.
+a real-looking secret value leaked into `.env.example` (vs. a harmless
+placeholder like `your_key_here`), and JSON output correctness.
 
 ## License
 
