@@ -9,6 +9,7 @@
 //
 //	envguard [path]            scan a project (default ".")
 //	envguard -ci [path]        same, but exit non-zero on any finding (for CI)
+//	envguard -fix [path]       append vars missing from .env.example (empty values)
 //
 // Supports JS/TS (process.env.X), Go (os.Getenv/os.LookupEnv), and
 // Python (os.environ / os.getenv) source files, plus .env / .env.example
@@ -36,7 +37,13 @@ var (
 	// misses entirely, producing false "undocumented var" negatives.
 	reJSEnvDestructure  = regexp.MustCompile(`(?:const|let|var)\s*\{\s*([^}]+?)\s*\}\s*=\s*process\.env\b`)
 	reJSDestructureName = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)`)
-	reGoEnv             = regexp.MustCompile(`os\.(?:Getenv|LookupEnv|MustGetenv)\(\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*\)`)
+	// Vite: import.meta.env.X, import.meta.env["X"], and destructuring.
+	reViteEnv            = regexp.MustCompile(`import\.meta\.env\.([A-Za-z_][A-Za-z0-9_]*)`)
+	reViteEnvIdx         = regexp.MustCompile(`import\.meta\.env\[['"]([A-Za-z_][A-Za-z0-9_]*)['"]\]`)
+	reViteEnvDestructure = regexp.MustCompile(`(?:const|let|var)\s*\{\s*([^}]+?)\s*\}\s*=\s*import\.meta\.env\b`)
+	// viteBuiltins are flags Vite injects itself; they are not user config.
+	viteBuiltins = map[string]bool{"MODE": true, "BASE_URL": true, "PROD": true, "DEV": true, "SSR": true}
+	reGoEnv             =regexp.MustCompile(`os\.(?:Getenv|LookupEnv|MustGetenv)\(\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*\)`)
 	rePyEnv1            = regexp.MustCompile(`os\.environ\[\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s*\]`)
 	rePyEnv2            = regexp.MustCompile(`os\.environ\.get\(\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]`)
 	rePyEnv3            = regexp.MustCompile(`os\.getenv\(\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]`)
@@ -81,11 +88,21 @@ type findings struct {
 	trackedEnv      bool                // .env is tracked by git
 	secretsInEnv    []string
 	leakedInExample []string // keys in .env.example whose value looks like a real secret, not a placeholder
+	examplePath     string   // path of the first .env.example-style file found (target of -fix)
+}
+
+func newFindings() *findings {
+	return &findings{
+		usedVars:   map[string][]string{},
+		exampleEnv: map[string]string{},
+		localEnv:   map[string]string{},
+	}
 }
 
 func main() {
 	ci := flag.Bool("ci", false, "exit non-zero if any drift or risk is found")
 	asJSON := flag.Bool("json", false, "output machine-readable JSON instead of text (for CI/tooling integration)")
+	fix := flag.Bool("fix", false, "append variables used in code but missing from .env.example (empty values)")
 	flag.Parse()
 
 	root := "."
@@ -93,15 +110,22 @@ func main() {
 		root = args[0]
 	}
 
-	f := &findings{
-		usedVars:   map[string][]string{},
-		exampleEnv: map[string]string{},
-		localEnv:   map[string]string{},
-	}
+	f := newFindings()
 
 	if err := scan(root, f); err != nil {
 		fmt.Fprintln(os.Stderr, "envguard: error:", err)
 		os.Exit(2)
+	}
+
+	if *fix {
+		added, err := applyFix(root, f)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "envguard: fix failed:", err)
+			os.Exit(2)
+		}
+		if len(added) > 0 {
+			fmt.Fprintf(os.Stderr, "envguard: added %d var(s) to .env.example: %s\n", len(added), strings.Join(added, ", "))
+		}
 	}
 
 	var issues int
@@ -205,6 +229,9 @@ func scan(root string, f *findings) error {
 			}
 		case strings.Contains(base, "example") || strings.Contains(base, "sample") || strings.Contains(base, "template"):
 			if strings.HasPrefix(base, ".env") {
+				if f.examplePath == "" {
+					f.examplePath = path
+				}
 				parseEnvFile(path, f.exampleEnv)
 			}
 		}
@@ -278,7 +305,15 @@ func scanSource(path, ext string, f *findings) {
 	default: // js/ts family
 		matches = append(matches, reJSEnv.FindAllStringSubmatch(content, -1)...)
 		matches = append(matches, reJSEnvIdx.FindAllStringSubmatch(content, -1)...)
-		for _, name := range extractDestructuredNames(content) {
+		matches = append(matches, filterBuiltins(reViteEnv.FindAllStringSubmatch(content, -1))...)
+		matches = append(matches, filterBuiltins(reViteEnvIdx.FindAllStringSubmatch(content, -1))...)
+		names := extractDestructuredNames(reJSEnvDestructure, content)
+		for _, name := range extractDestructuredNames(reViteEnvDestructure, content) {
+			if !viteBuiltins[name] {
+				names = append(names, name)
+			}
+		}
+		for _, name := range names {
 			f.usedVars[name] = appendUnique(f.usedVars[name], path)
 		}
 	}
@@ -292,9 +327,9 @@ func scanSource(path, ext string, f *findings) {
 // extractDestructuredNames finds env var names pulled out via object
 // destructuring, e.g. `const { PORT, DB_URL: url, TIMEOUT = 30 } = process.env`.
 // Only the real env var name (left of any `: alias` or `= default`) is kept.
-func extractDestructuredNames(content string) []string {
+func extractDestructuredNames(re *regexp.Regexp, content string) []string {
 	var names []string
-	for _, block := range reJSEnvDestructure.FindAllStringSubmatch(content, -1) {
+	for _, block := range re.FindAllStringSubmatch(content, -1) {
 		for _, field := range strings.Split(block[1], ",") {
 			field = strings.TrimSpace(field)
 			if field == "" {
@@ -306,6 +341,17 @@ func extractDestructuredNames(content string) []string {
 		}
 	}
 	return names
+}
+
+// filterBuiltins drops matches naming Vite's built-in flags (PROD, DEV, ...).
+func filterBuiltins(matches [][]string) [][]string {
+	kept := make([][]string, 0, len(matches))
+	for _, m := range matches {
+		if !viteBuiltins[m[1]] {
+			kept = append(kept, m)
+		}
+	}
+	return kept
 }
 
 func appendUnique(list []string, v string) []string {

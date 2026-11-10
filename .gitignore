@@ -3,8 +3,5 @@ envguard
 envguard.exe
 *.exe
 
-# Test fixtures (local-only, not part of repo content)
-/testdata/
-
 # OS
 .DS_Store

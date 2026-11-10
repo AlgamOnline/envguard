@@ -79,6 +79,26 @@ func TestDestructuredEnvVarsAreDetected(t *testing.T) {
 	}
 }
 
+// TestViteImportMetaEnvIsDetected covers Vite's import.meta.env.X (dot, index
+// and destructuring forms). Built-in flags (PROD, DEV, MODE, BASE_URL, SSR)
+// are not user config and must never be reported as undocumented.
+func TestViteImportMetaEnvIsDetected(t *testing.T) {
+	out := runEnvguard(t, "testdata/vite")
+	for _, want := range []string{"- VITE_ANALYTICS_ID", "- VITE_FEATURE_X"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q flagged as undocumented, got:\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{"- PROD", "- VITE_API_URL ", "- VITE_THEME "} {
+		if strings.Contains(out, bad) {
+			t.Errorf("%q should not be flagged undocumented, got:\n%s", bad, out)
+		}
+	}
+	if strings.Contains(out, "[UNUSED]") {
+		t.Errorf("documented vars are used via import.meta.env, should not be unused, got:\n%s", out)
+	}
+}
+
 func contains(list []string, v string) bool {
 	for _, x := range list {
 		if x == v {

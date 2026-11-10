@@ -99,6 +99,17 @@ envguard -json . | jq '.issue_count'
 `-ci` and `-json` can be combined (`envguard -ci -json .`): exit code still
 reflects drift, stdout is JSON.
 
+## Auto-fix
+
+`-fix` appends every variable that is used in code but missing from
+`.env.example` (empty values, never guessed), creating the file if needed.
+It is idempotent, and the note is printed to stderr so `-json` stays clean:
+
+```bash
+envguard -fix .
+# envguard: added 2 var(s) to .env.example: ANOTHER, NEW_VAR
+```
+
 ## Tech stack
 
 - **Go** (stdlib only — `regexp`, `flag`, `bufio`, `path/filepath`, `os/exec`) — no third-party dependencies, so it compiles to one portable static binary for any OS/arch Go supports.
@@ -109,6 +120,7 @@ reflects drift, stdout is JSON.
 | Language | Patterns detected |
 |---|---|
 | JavaScript/TypeScript | `process.env.X`, `process.env["X"]`, destructuring: `const { X, Y: alias } = process.env` |
+| Vite (JS/TS) | `import.meta.env.X`, `import.meta.env["X"]`, destructuring; built-ins (`MODE`, `BASE_URL`, `PROD`, `DEV`, `SSR`) are ignored |
 | Go | `os.Getenv("X")`, `os.LookupEnv("X")` |
 | Python | `os.environ["X"]`, `os.environ.get("X")`, `os.getenv("X")` |
 
