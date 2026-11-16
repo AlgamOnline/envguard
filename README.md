@@ -6,7 +6,7 @@ A tiny, dependency-free CLI that finds **environment-variable drift** in a codeb
 
 Every real project grows env vars organically: someone adds `process.env.STRIPE_KEY` in a new feature, forgets to add it to `.env.example`, and a week later a teammate (or CI) fails with a cryptic `undefined` error. Or the reverse: `.env.example` documents a var nobody actually uses anymore. Or — worse — a `.env` file with real secrets gets `git add`-ed by accident.
 
-These are small, boring bugs, but they eat real time, especially onboarding new engineers or spinning up CI. There's no single standard tool that checks this across JS/TS, Go, and Python in one pass.
+These are small, boring bugs, but they eat real time, especially onboarding new engineers or spinning up CI. There's no single standard tool that checks this across JS/TS, Go, Python, Ruby, PHP, and Rust in one pass.
 
 ## What it does
 
@@ -123,6 +123,9 @@ envguard -fix .
 | Vite (JS/TS) | `import.meta.env.X`, `import.meta.env["X"]`, destructuring; built-ins (`MODE`, `BASE_URL`, `PROD`, `DEV`, `SSR`) are ignored |
 | Go | `os.Getenv("X")`, `os.LookupEnv("X")` |
 | Python | `os.environ["X"]`, `os.environ.get("X")`, `os.getenv("X")` |
+| Ruby | `ENV['X']`, `ENV["X"]`, `ENV.fetch('X', default)` |
+| PHP | `getenv('X')`, `$_ENV['X']`, `$_SERVER['X']`, Laravel `env('X')` |
+| Rust | `env::var("X")`, `env::var_os("X")`, `env!("X")`, `option_env!("X")` (`target/` is skipped) |
 
 ## Tests
 

@@ -11,8 +11,9 @@
 //	envguard -ci [path]        same, but exit non-zero on any finding (for CI)
 //	envguard -fix [path]       append vars missing from .env.example (empty values)
 //
-// Supports JS/TS (process.env.X), Go (os.Getenv/os.LookupEnv), and
-// Python (os.environ / os.getenv) source files, plus .env / .env.example
+// Supports JS/TS (process.env.X), Go (os.Getenv/os.LookupEnv), Python
+// (os.environ / os.getenv), Ruby (ENV), PHP (getenv/$_ENV) and Rust
+// (env::var) source files, plus .env / .env.example
 // / .env.sample files.
 package main
 
@@ -48,9 +49,9 @@ var (
 	rePyEnv2            = regexp.MustCompile(`os\.environ\.get\(\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]`)
 	rePyEnv3            = regexp.MustCompile(`os\.getenv\(\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]`)
 	reEnvFile           = regexp.MustCompile(`^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$`)
-	skipDirs            = map[string]bool{".git": true, "node_modules": true, "vendor": true, "dist": true, "build": true, ".next": true, "__pycache__": true, ".venv": true, "venv": true}
+	skipDirs            = map[string]bool{".git": true, "node_modules": true, "vendor": true, "dist": true, "build": true, ".next": true, "__pycache__": true, ".venv": true, "venv": true, "target": true}
 	secretHints         = regexp.MustCompile(`(?i)(key|secret|token|password|pass|pwd|api)`)
-	sourceExts          = map[string]bool{".js": true, ".jsx": true, ".ts": true, ".tsx": true, ".mjs": true, ".cjs": true, ".go": true, ".py": true}
+	sourceExts          = map[string]bool{".js": true, ".jsx": true, ".ts": true, ".tsx": true, ".mjs": true, ".cjs": true, ".go": true, ".py": true, ".rb": true, ".php": true, ".rs": true}
 	// placeholderHints matches values that are clearly dummy/placeholder text,
 	// so a real-looking secret value isn't confused with "your_key_here".
 	placeholderHints = regexp.MustCompile(`(?i)^(your[_-]?|my[_-]?|<|\[|\{\{|x{3,}|changeme|change_me|example|sample|dummy|placeholder|todo|fixme|replace|test|fake|none|null|xxx|foo|bar|some|insert|here|secret_here|value|redacted|\*{3,})`)
@@ -296,6 +297,12 @@ func scanSource(path, ext string, f *findings) {
 	var matches [][]string
 
 	switch ext {
+	case ".rb":
+		matches = findAllNames(reRubyEnv, content)
+	case ".php":
+		matches = findAllNames(rePHPEnv, content)
+	case ".rs":
+		matches = findAllNames(reRustEnv, content)
 	case ".go":
 		matches = reGoEnv.FindAllStringSubmatch(content, -1)
 	case ".py":
