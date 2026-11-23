@@ -26,6 +26,12 @@ var (
 	reCSharpEnv = regexp.MustCompile(`Environment\.GetEnvironmentVariable\(` + optSpaces + `"` + name + `"`)
 	// Deno (TS/JS): Deno.env.get("X")
 	reDenoEnv = regexp.MustCompile(notIdent + `Deno\.env\.get\(` + optSpaces + quote + name + quote)
+
+	// Docker Compose variable substitution: ${VAR}, ${VAR:-default}, ${VAR:?err}.
+	// This is the #1 real-world "works on my machine" trap with Compose: the
+	// var silently defaults to an empty string if missing, instead of erroring
+	// (see docker-compose "variable is not set, defaulting to a blank string").
+	reComposeEnv = regexp.MustCompile(notIdent + `\$\{` + name + `(?::[-?][^}]*)?\}`)
 )
 
 // firstNonEmptyGroup returns the first non-empty capture group of a match,

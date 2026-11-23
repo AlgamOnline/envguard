@@ -6,13 +6,15 @@ A tiny, dependency-free CLI that finds **environment-variable drift** in a codeb
 
 Every real project grows env vars organically: someone adds `process.env.STRIPE_KEY` in a new feature, forgets to add it to `.env.example`, and a week later a teammate (or CI) fails with a cryptic `undefined` error. Or the reverse: `.env.example` documents a var nobody actually uses anymore. Or — worse — a `.env` file with real secrets gets `git add`-ed by accident.
 
-These are small, boring bugs, but they eat real time, especially onboarding new engineers or spinning up CI. There's no single standard tool that checks this across JS/TS (Node, Vite, Deno), Go, Python, Ruby, PHP, Rust, Java/Kotlin, and C# in one pass.
+Docker Compose has its own flavor of this bug that's even sneakier: a `${VAR}` reference in `docker-compose.yml` that isn't set anywhere just **silently defaults to an empty string** instead of erroring (Compose prints a `WARN ... variable is not set, defaulting to a blank string` that most people miss in a wall of startup logs). The container starts fine, looks healthy, and is quietly misconfigured.
+
+These are small, boring bugs, but they eat real time, especially onboarding new engineers or spinning up CI. There's no single standard tool that checks this across JS/TS, Go, Python, Ruby, PHP, Rust, and Docker Compose in one pass.
 
 ## What it does
 
 `envguard` scans a project directory and cross-references:
 
-1. **Env vars used in source code** — `process.env.X` (JS/TS, including `const { X, Y: alias } = process.env` destructuring), `os.Getenv("X")` / `os.LookupEnv("X")` (Go), `os.environ["X"]` / `os.getenv("X")` (Python)
+1. **Env vars used in source code or config** — `process.env.X` (JS/TS, including `const { X, Y: alias } = process.env` destructuring), `os.Getenv("X")` / `os.LookupEnv("X")` (Go), `os.environ["X"]` / `os.getenv("X")` (Python), and `${X}` / `${X:-default}` / `${X:?err}` substitutions in `docker-compose.yml` / `compose.yaml`
 2. **Env vars documented** in `.env.example` / `.env.sample` / `.env.template`
 3. **Env vars actually set locally** in `.env`
 

@@ -52,6 +52,9 @@ var (
 	skipDirs            = map[string]bool{".git": true, "node_modules": true, "vendor": true, "dist": true, "build": true, ".next": true, "__pycache__": true, ".venv": true, "venv": true, "target": true}
 	secretHints         = regexp.MustCompile(`(?i)(key|secret|token|password|pass|pwd|api)`)
 	sourceExts          = map[string]bool{".js": true, ".jsx": true, ".ts": true, ".tsx": true, ".mjs": true, ".cjs": true, ".go": true, ".py": true, ".rb": true, ".php": true, ".rs": true, ".java": true, ".kt": true, ".kts": true, ".cs": true}
+	// composeBuiltins are Compose-injected names, not user config, so they
+	// shouldn't be flagged as undocumented env vars.
+	composeBuiltins = map[string]bool{"COMPOSE_PROJECT_NAME": true, "COMPOSE_FILE": true, "COMPOSE_PROFILES": true}
 	// placeholderHints matches values that are clearly dummy/placeholder text,
 	// so a real-looking secret value isn't confused with "your_key_here".
 	placeholderHints = regexp.MustCompile(`(?i)^(your[_-]?|my[_-]?|<|\[|\{\{|x{3,}|changeme|change_me|example|sample|dummy|placeholder|todo|fixme|replace|test|fake|none|null|xxx|foo|bar|some|insert|here|secret_here|value|redacted|\*{3,})`)
@@ -241,6 +244,9 @@ func scan(root string, f *findings) error {
 		if sourceExts[ext] {
 			scanSource(path, ext, f)
 		}
+		if isComposeFile(base) {
+			scanCompose(path, f)
+		}
 		return nil
 	})
 	if err != nil {
@@ -332,6 +338,37 @@ func scanSource(path, ext string, f *findings) {
 
 	for _, m := range matches {
 		name := m[1]
+		f.usedVars[name] = appendUnique(f.usedVars[name], path)
+	}
+}
+
+// isComposeFile reports whether base looks like a docker-compose manifest
+// (docker-compose.yml, compose.yaml, docker-compose.override.yml, ...).
+func isComposeFile(base string) bool {
+	lower := strings.ToLower(base)
+	if lower == "docker-compose.yml" || lower == "docker-compose.yaml" || lower == "compose.yml" || lower == "compose.yaml" {
+		return true
+	}
+	return (strings.HasPrefix(lower, "docker-compose.") || strings.HasPrefix(lower, "compose.")) &&
+		(strings.HasSuffix(lower, ".yml") || strings.HasSuffix(lower, ".yaml"))
+}
+
+// scanCompose records every ${VAR}/${VAR:-default}/${VAR:?msg} substitution
+// found in a docker-compose manifest as a "used" env var. Compose silently
+// defaults an undefined var to an empty string instead of failing loudly, so
+// catching these at lint-time (before `docker compose up`) prevents a classic
+// class of "container starts but is misconfigured" bugs.
+func scanCompose(path string, f *findings) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	content := string(data)
+	for _, m := range reComposeEnv.FindAllStringSubmatch(content, -1) {
+		name := m[1]
+		if composeBuiltins[name] {
+			continue
+		}
 		f.usedVars[name] = appendUnique(f.usedVars[name], path)
 	}
 }

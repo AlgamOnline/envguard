@@ -90,3 +90,30 @@ func TestUnrelatedCallsNotDetected(t *testing.T) {
 	got := scanOne(t, "x.rb", `puts ENVIRONMENT['nope']; MYENV['ALSO_NO']`)
 	assertVars(t, got)
 }
+
+func TestDockerComposeVarSubstitutionDetection(t *testing.T) {
+	got := scanOne(t, "docker-compose.yml", `
+services:
+  web:
+    image: myapp
+    environment:
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT:-5432}
+      - SECRET=${REQUIRED_SECRET:?must be set}
+      - PROJECT=${COMPOSE_PROJECT_NAME}
+`)
+	assertVars(t, got, "DB_HOST", "DB_PORT", "REQUIRED_SECRET")
+}
+
+func TestComposeYamlAndOverrideFilenamesDetected(t *testing.T) {
+	got := scanOne(t, "compose.yaml", `x: ${FOO_VAR}`)
+	assertVars(t, got, "FOO_VAR")
+
+	got = scanOne(t, "docker-compose.override.yml", `x: ${BAR_VAR}`)
+	assertVars(t, got, "BAR_VAR")
+}
+
+func TestNonComposeYamlIgnoredForVarSubstitution(t *testing.T) {
+	got := scanOne(t, "k8s-deployment.yaml", `env: ${NOT_SCANNED}`)
+	assertVars(t, got)
+}
