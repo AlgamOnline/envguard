@@ -19,6 +19,13 @@ var (
 	rePHPEnv = regexp.MustCompile(`(?:` + notIdent + `(?:getenv|env)\(` + optSpaces + quote + name + quote + `|\$_(?:ENV|SERVER)\[` + optSpaces + quote + name + quote + `)`)
 	// Rust: env::var("X"), env::var_os("X"), env!("X"), option_env!("X")
 	reRustEnv = regexp.MustCompile(`(?:env::var(?:_os)?\(` + optSpaces + `"` + name + `"|(?:option_)?env!\(` + optSpaces + `"` + name + `")`)
+
+	// Java/Kotlin: System.getenv("X")
+	reJavaEnv = regexp.MustCompile(notIdent + `System\.getenv\(` + optSpaces + `"` + name + `"`)
+	// C#: Environment.GetEnvironmentVariable("X")
+	reCSharpEnv = regexp.MustCompile(`Environment\.GetEnvironmentVariable\(` + optSpaces + `"` + name + `"`)
+	// Deno (TS/JS): Deno.env.get("X")
+	reDenoEnv = regexp.MustCompile(notIdent + `Deno\.env\.get\(` + optSpaces + quote + name + quote)
 )
 
 // firstNonEmptyGroup returns the first non-empty capture group of a match,

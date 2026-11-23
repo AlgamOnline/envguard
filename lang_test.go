@@ -62,6 +62,30 @@ fn main() {
 	assertVars(t, got, "DATABASE_URL", "HOME_DIR", "BUILD_TARGET", "OPTIONAL_FLAG")
 }
 
+func TestJavaKotlinEnvDetection(t *testing.T) {
+	got := scanOne(t, "App.java", `
+String a = System.getenv("JAVA_DB");
+String b = System.getenv( "JAVA_PORT" );
+String c = System.getenv().get("IGNORED_MAP_STYLE");
+`)
+	assertVars(t, got, "JAVA_DB", "JAVA_PORT")
+	got = scanOne(t, "Main.kt", `val k = System.getenv("KOTLIN_KEY") ?: "x"`)
+	assertVars(t, got, "KOTLIN_KEY")
+}
+
+func TestCSharpEnvDetection(t *testing.T) {
+	got := scanOne(t, "Program.cs", `
+var a = Environment.GetEnvironmentVariable("CS_CONN");
+var b = System.Environment.GetEnvironmentVariable( "CS_TOKEN", EnvironmentVariableTarget.Process);
+`)
+	assertVars(t, got, "CS_CONN", "CS_TOKEN")
+}
+
+func TestDenoEnvDetection(t *testing.T) {
+	got := scanOne(t, "main.ts", `const a = Deno.env.get("DENO_KEY"); const b = Deno.env.get('DENO_URL');`)
+	assertVars(t, got, "DENO_KEY", "DENO_URL")
+}
+
 func TestUnrelatedCallsNotDetected(t *testing.T) {
 	got := scanOne(t, "x.rb", `puts ENVIRONMENT['nope']; MYENV['ALSO_NO']`)
 	assertVars(t, got)

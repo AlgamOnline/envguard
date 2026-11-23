@@ -51,7 +51,7 @@ var (
 	reEnvFile           = regexp.MustCompile(`^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$`)
 	skipDirs            = map[string]bool{".git": true, "node_modules": true, "vendor": true, "dist": true, "build": true, ".next": true, "__pycache__": true, ".venv": true, "venv": true, "target": true}
 	secretHints         = regexp.MustCompile(`(?i)(key|secret|token|password|pass|pwd|api)`)
-	sourceExts          = map[string]bool{".js": true, ".jsx": true, ".ts": true, ".tsx": true, ".mjs": true, ".cjs": true, ".go": true, ".py": true, ".rb": true, ".php": true, ".rs": true}
+	sourceExts          = map[string]bool{".js": true, ".jsx": true, ".ts": true, ".tsx": true, ".mjs": true, ".cjs": true, ".go": true, ".py": true, ".rb": true, ".php": true, ".rs": true, ".java": true, ".kt": true, ".kts": true, ".cs": true}
 	// placeholderHints matches values that are clearly dummy/placeholder text,
 	// so a real-looking secret value isn't confused with "your_key_here".
 	placeholderHints = regexp.MustCompile(`(?i)^(your[_-]?|my[_-]?|<|\[|\{\{|x{3,}|changeme|change_me|example|sample|dummy|placeholder|todo|fixme|replace|test|fake|none|null|xxx|foo|bar|some|insert|here|secret_here|value|redacted|\*{3,})`)
@@ -303,6 +303,10 @@ func scanSource(path, ext string, f *findings) {
 		matches = findAllNames(rePHPEnv, content)
 	case ".rs":
 		matches = findAllNames(reRustEnv, content)
+	case ".java", ".kt", ".kts":
+		matches = findAllNames(reJavaEnv, content)
+	case ".cs":
+		matches = findAllNames(reCSharpEnv, content)
 	case ".go":
 		matches = reGoEnv.FindAllStringSubmatch(content, -1)
 	case ".py":
@@ -312,6 +316,7 @@ func scanSource(path, ext string, f *findings) {
 	default: // js/ts family
 		matches = append(matches, reJSEnv.FindAllStringSubmatch(content, -1)...)
 		matches = append(matches, reJSEnvIdx.FindAllStringSubmatch(content, -1)...)
+		matches = append(matches, findAllNames(reDenoEnv, content)...)
 		matches = append(matches, filterBuiltins(reViteEnv.FindAllStringSubmatch(content, -1))...)
 		matches = append(matches, filterBuiltins(reViteEnvIdx.FindAllStringSubmatch(content, -1))...)
 		names := extractDestructuredNames(reJSEnvDestructure, content)
